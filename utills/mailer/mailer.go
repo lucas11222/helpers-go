@@ -1,4 +1,4 @@
-package utiils
+package mailer
 
 import (
 	"context"

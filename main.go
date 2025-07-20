@@ -31,14 +31,17 @@ func sentrydatabase() {
 	}
 }
 func main() {
+	// load env
 	env := godotenv.Load()
 	if env != nil {
 		log.Fatal("Error loading .env file. Check the .env for any formating errors.")
 	}
+	// if production enable sentry
 	if os.Getenv("DB_ENV") == "production" {
 		sentrydatabase()
 	}
+	// start the rest api
 	r := routes.SetupRouter()
-	// Listen and Server in 0.0.0.0:8080
+	// Listen and Server in 0.0.0.0:8000 (the same as the python version)
 	r.Run(":8000")
 }

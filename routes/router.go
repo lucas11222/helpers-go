@@ -56,7 +56,7 @@ func SetupRouter() *gin.Engine {
 	})
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(404, gin.H{
-			"success": true,
+			"success": false,
 			"error":   "Page not found",
 			"type":    "not_found",
 			"message": "Not Found",

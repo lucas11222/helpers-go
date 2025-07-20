@@ -1,4 +1,4 @@
-package utiils
+package ai
 
 import (
 	"context"
