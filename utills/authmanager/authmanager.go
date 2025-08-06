@@ -130,6 +130,92 @@ func GetUserByToken(token string) (string, error) {
 
 	return string(jsonData), nil
 }
+func GetUserByTokenHash(token string) (*User, error) {
+	ok, email := JWTValidateToken(token)
+	if !ok {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	user, err := GetUserByEmailHash(email, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+func GetUserByEmailHash(email string, bypassCache bool) (*User, error) {
+	ctx := context.Background()
+	redisClient := RedisClient("cache")
+
+	if !bypassCache {
+		lookupIDCmd := redisClient.Get(ctx, "byEmail:"+email)
+		lookupID, err := lookupIDCmd.Result()
+		if err == nil {
+			cachedUser := redisClient.Get(ctx, "userdata:"+lookupID)
+			if cachedUser.Err() == nil {
+				var user User
+				if err := json.Unmarshal([]byte(cachedUser.Val()), &user); err == nil {
+					return &user, nil
+				}
+			}
+		}
+	}
+
+	client, userCollection, err := MongoDBClient("users")
+	if err != nil {
+		return nil, err
+	}
+	defer client.Disconnect(ctx)
+
+	var User User
+	err = userCollection.FindOne(ctx, bson.M{"email": email}).Decode(&User)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonData, err := json.Marshal(User)
+	if err == nil {
+		redisClient.Set(ctx, "userdata:"+User.ID, jsonData, 0)
+		redisClient.Set(ctx, "byEmail:"+User.Email, User.ID, 0)
+	}
+
+	return &User, nil
+}
+
+func GetUserByID(id string, bypassCache bool) (*GiveUser, error) {
+	ctx := context.Background()
+	cacheKey := "userdata:" + id
+	redisClient := RedisClient("cache")
+
+	if !bypassCache {
+		cachedUser := redisClient.Get(ctx, cacheKey)
+		if err := cachedUser.Err(); err == nil {
+			var User GiveUser
+			if err := json.Unmarshal([]byte(cachedUser.Val()), &User); err == nil {
+				return &User, nil
+			}
+		}
+	}
+
+	client, userCollection, err := MongoDBClient("users")
+	if err != nil {
+		return nil, err
+	}
+	defer client.Disconnect(ctx)
+
+	var User GiveUser
+	err = userCollection.FindOne(ctx, bson.M{"_id": id}).Decode(&User)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonData, err := json.Marshal(User)
+	if err == nil {
+		redisClient.Set(ctx, cacheKey, jsonData, 0)
+	}
+
+	return &User, nil
+}
 func GetUserByEmail(email string, bypassCache bool) (*GiveUser, error) {
 	ctx := context.Background()
 	redisClient := RedisClient("cache")
@@ -160,7 +246,6 @@ func GetUserByEmail(email string, bypassCache bool) (*GiveUser, error) {
 		return nil, err
 	}
 
-	// Guardar en Redis
 	jsonData, err := json.Marshal(User)
 	if err == nil {
 		redisClient.Set(ctx, "userdata:"+User.ID, jsonData, 0)
@@ -170,7 +255,7 @@ func GetUserByEmail(email string, bypassCache bool) (*GiveUser, error) {
 	return &User, nil
 }
 
-func GetUserByID(id string, bypassCache bool) (*User, error) {
+func GetUserByIdHash(id string, bypassCache bool) (*User, error) {
 	ctx := context.Background()
 	cacheKey := "userdata:" + id
 	redisClient := RedisClient("cache")
@@ -197,7 +282,6 @@ func GetUserByID(id string, bypassCache bool) (*User, error) {
 		return nil, err
 	}
 
-	// Guardar en Redis
 	jsonData, err := json.Marshal(User)
 	if err == nil {
 		redisClient.Set(ctx, cacheKey, jsonData, 0)
@@ -205,7 +289,6 @@ func GetUserByID(id string, bypassCache bool) (*User, error) {
 
 	return &User, nil
 }
-
 func GetUserByUsername(username string, bypassCache bool) (*User, error) {
 	ctx := context.Background()
 	redisClient := RedisClient("cache")
@@ -236,7 +319,6 @@ func GetUserByUsername(username string, bypassCache bool) (*User, error) {
 		return nil, err
 	}
 
-	// Guardar en Redis
 	jsonData, err := json.Marshal(User)
 	if err == nil {
 		redisClient.Set(ctx, "userdata:"+User.ID, jsonData, 0)
@@ -421,7 +503,7 @@ func UnBlockUser(userid, reason string) (bool, error) {
 	return true, nil
 }
 func ResetPassword(userid, newpassword string) (bool, error) {
-	user, err := GetUserByID(userid, false)
+	user, err := GetUserByIdHash(userid, false)
 	if err != nil {
 		return false, err
 	}

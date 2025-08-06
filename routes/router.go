@@ -24,6 +24,7 @@ func ErrorHandler() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, map[string]any{
 				"success": false,
 				"message": err.Error(),
+				"type":    "unknown",
 			})
 		}
 
@@ -54,21 +55,20 @@ func SetupRouter() *gin.Engine {
 	})
 	r.GET("/v2/accounts/me", func(c *gin.Context) {
 		token := c.GetHeader("Authorization") // cleaner than c.Request.Header.Get()
-
+		if token == "" {
+			c.JSON(400, gin.H{
+				"messege": "The token is empty",
+				"success": false,
+				"type":    "missing_token",
+			})
+			return
+		}
 		userJSON, err := authmanager.GetUserByToken(token)
 		if err != nil {
 			c.JSON(401, gin.H{
 				"messege": "The token is invalid or expired.",
 				"success": false,
 				"type":    "invalid_token",
-			})
-			return
-		}
-		if token == "" {
-			c.JSON(400, gin.H{
-				"messege": "The token is empty",
-				"success": false,
-				"type":    "missing_token",
 			})
 			return
 		}
@@ -103,19 +103,106 @@ func SetupRouter() *gin.Engine {
 		}
 		token, err := authmanager.CreateAccount(req.Name, req.Username, req.Email, req.Password)
 		if err == nil {
-			c.JSON(200, gin.H{
-				"success": false,
-				"type":    "unknown",
-				"messege": "An unknown error occurred while creating the account. This is when the prosses of creating the token has failed.",
-			})
+			c.Error(errors.New("An unknown error occurred while creating the account. This is when the prosses of creating the token has failed."))
+			return
 		}
 		c.JSON(200, gin.H{
 			"success": true,
 			"token":   token,
 		})
 	})
+	type loginRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	r.POST("/v2/accounts/login", func(c *gin.Context) {
+		var req loginRequest
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{
+				"messege": "Invalid JSON",
+				"type":    "invalid_json",
+				"success": false,
+			})
+			return
+		}
+
+		if req.Email == "" || req.Password == "" {
+			c.JSON(400, gin.H{
+				"error":   "Please provide all required fields.",
+				"type":    "missing_fields",
+				"success": false,
+			})
+			return
+		}
+		token, err := authmanager.JWTCreateToken(req.Email)
+		if err == nil {
+			c.Error(errors.New("An unknown error occurred while creating the token."))
+			return
+		}
+		hash, err := authmanager.GetUserByEmailHash(req.Email, true)
+		password := authmanager.CheckPassword(req.Password, hash.PasswordHash)
+		if password != false {
+			c.JSON(500, gin.H{
+				"success": false,
+				"type":    "invalid_credentials",
+				"messege": "The password is invalid.",
+			})
+			return
+		}
+		if err == nil {
+			c.Error(errors.New("An unknown error occurred while checking the password."))
+		}
+		c.JSON(200, gin.H{
+			"success": true,
+			"token":   token,
+		})
+	})
+	type deleteRequest struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	r.DELETE("/v2/accounts/delete", func(c *gin.Context) {
+		var req deleteRequest
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{
+				"messege": "Invalid JSON",
+				"type":    "invalid_json",
+				"success": false,
+			})
+			return
+		}
+
+		if req.Password == "" {
+			c.JSON(400, gin.H{
+				"error":   "Please provide all required fields.",
+				"type":    "missing_fields",
+				"success": false,
+			})
+			return
+		}
+		hash, err := authmanager.GetUserByTokenHash(c.GetHeader("Authorization"))
+		password := authmanager.CheckPassword(req.Password, hash.PasswordHash)
+		if password != false {
+			c.JSON(500, gin.H{
+				"success": false,
+				"type":    "invalid_credentials",
+				"messege": "The password is invalid.",
+			})
+			return
+		}
+		if err == nil {
+			c.Error(errors.New("Cannot get user by token"))
+		}
+		authmanager.DeleteAccount(req.Email)
+		c.JSON(200, gin.H{
+			"success": true,
+			"message": "Account deleted successfully",
+		})
+	})
 	r.GET("/", func(c *gin.Context) {
-		c.String(200, "hello world :) running in the go version")
+		c.String(200, "hello world :) running in the go version!")
 	})
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(404, gin.H{
@@ -124,9 +211,6 @@ func SetupRouter() *gin.Engine {
 			"type":    "not_found",
 			"message": "Not Found",
 		})
-	})
-	r.GET("/error-test", func(c *gin.Context) {
-		c.Error(errors.New("something went wrong"))
 	})
 	return r
 }
